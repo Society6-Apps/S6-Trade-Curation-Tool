@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getPool, OFFERED_TYPES } from '../../../../lib/newDesigns.js';
+import { getPool } from '../../../../lib/newDesigns.js';
+import { ALL_PRODUCT_TYPES } from '../../../../lib/handoff.js';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 26;
@@ -14,6 +15,35 @@ export const maxDuration = 26;
 //            as import-pillows.mjs; NEVER truncates)
 //   pages   {uploadId, rows:[{page_id, handle, product_type, design_key}]}
 //   finish  {uploadId, totalDesigns, totalPages, unknownTypes:[{type,pages}]}
+
+// Product types the curation tool offers — derived from the canonical list in
+// lib/handoff.js so the two can never drift. (This used to be imported from
+// lib/newDesigns.js, which never exported it: the value was undefined, so the
+// design_formats insert below silently matched no rows.)
+const OFFERED_TYPES = ALL_PRODUCT_TYPES.map(t => t.type);
+
+// Register nd_pages rows (offered types only) in design_formats so the designs
+// are recommendable. uploadId = null means every upload (one-time backfill).
+// URL falls back to the Shopify handle path, which the front end already
+// expands to the full society6.com link. Idempotent.
+async function registerFormats(pool, uploadId) {
+  const res = await pool.query(
+    `INSERT INTO design_formats (design_key, product_type, url, image_url)
+     SELECT DISTINCT ON (design_key, product_type)
+            design_key, product_type,
+            COALESCE(NULLIF(url, ''), '/products/' || handle),
+            NULLIF(image_url, '')
+     FROM nd_pages
+     WHERE ($1::int IS NULL OR upload_id = $1) AND product_type = ANY($2::text[])
+     ORDER BY design_key, product_type, upload_id DESC
+     ON CONFLICT (design_key, product_type) DO UPDATE SET
+       image_url = COALESCE(NULLIF(design_formats.image_url, ''), EXCLUDED.image_url),
+       url       = COALESCE(NULLIF(design_formats.url, ''), EXCLUDED.url)
+     RETURNING (xmax = 0) AS inserted`,
+    [uploadId, OFFERED_TYPES]
+  );
+  return { touched: res.rowCount, added: res.rows.filter(r => r.inserted).length };
+}
 
 // Column candidates, same spirit as import-pillows.mjs MAP: adapt to whatever
 // columns the products table actually has.
@@ -184,22 +214,17 @@ export async function POST(request) {
       );
       // Feed the curation tool: register this upload's pages (offered types
       // only) in design_formats so new designs are recommendable immediately.
-      // URL falls back to the Shopify handle path, which the front end already
-      // expands to the full society6.com link.
       await ensureAux(pool);
-      const fmt = await pool.query(
-        `INSERT INTO design_formats (design_key, product_type, url, image_url)
-         SELECT design_key, product_type,
-                COALESCE(NULLIF(url, ''), '/products/' || handle),
-                NULLIF(image_url, '')
-         FROM nd_pages
-         WHERE upload_id = $1 AND product_type = ANY($2::text[])
-         ON CONFLICT (design_key, product_type) DO UPDATE SET
-           image_url = COALESCE(NULLIF(design_formats.image_url, ''), EXCLUDED.image_url),
-           url       = COALESCE(NULLIF(design_formats.url, ''), EXCLUDED.url)`,
-        [uploadId, OFFERED_TYPES]
-      );
-      return NextResponse.json({ ok: true, curationFormatsAdded: fmt.rowCount });
+      const fmt = await registerFormats(pool, uploadId);
+      return NextResponse.json({ ok: true, curationFormatsAdded: fmt.added });
+    }
+
+    // One-time repair for uploads finished while OFFERED_TYPES was undefined:
+    // re-registers every upload's pages. Safe to run more than once.
+    if (action === 'backfill-formats') {
+      await ensureAux(pool);
+      const fmt = await registerFormats(pool, null);
+      return NextResponse.json({ ok: true, ...fmt });
     }
 
     return NextResponse.json({ error: 'unknown action' }, { status: 400 });
