@@ -4,6 +4,13 @@
 // Do not hand-edit sentences here; edit them in the Catalog > New Designs UI instead.
 
 export const FORMAT_SEED = {
+  "Foil Art Print": {
+    "sentence": "Printed to order on premium archival paper and finished with gold or silver foil accents that catch the light as you move past. Each one arrives framed in a modern wrapped frame behind a clear cover, 9x12 for vertical artwork or 12x16 for horizontal, with an easel back and hardware so it can stand on a shelf or hang on the wall. Art with real metallic foil and a frame included, not a flat print imitating shine.",
+    "meta_label": "Foil art print",
+    "type_slug": "foil-art-print",
+    "drop_context": false,
+    "flat": false
+  },
   "Rectangular Pillow": {
     "sentence": "Soft micro-twill, cut and sewn by hand into a rectangular cushion with a hidden zip, insert included and made to order. The lumbar piece that finishes a sofa or bed, carrying an independent artist's work instead of store-shelf filler.",
     "meta_label": null,

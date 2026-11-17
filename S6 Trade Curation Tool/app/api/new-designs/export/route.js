@@ -8,7 +8,8 @@ export const maxDuration = 26;
 // Builds the Matrixify MERGE delta CSV for this upload — the exact stamp.py
 // output shape. MERGE + only these columns means every other Shopify field is
 // left untouched. Skip rules are stamp.py's verbatim: no copy yet, blank
-// artwork, unknown type (no format sentence), Foil Art Print.
+// artwork, unknown type (no format sentence). Foil Art Print was excluded
+// until Nov 2026; it now has an approved sentence and is stamped normally.
 //
 // Header must stay BYTE-EXACT or the Matrixify import fails silently:
 //   ID,Handle,Command,Body HTML,Metafield: description_tag [string]
@@ -45,7 +46,7 @@ export async function GET(request) {
       loadFormatConfig(pool),
     ]);
 
-    const counts = { written: 0, missing_copy: 0, blank_art: 0, unknown_type: 0, foil: 0 };
+    const counts = { written: 0, missing_copy: 0, blank_art: 0, unknown_type: 0 };
     const typeMix = {};
     const lines = ['ID,Handle,Command,Body HTML,' + csvField(SEO_DESC_COL)];
     const seen = new Set();
@@ -55,7 +56,6 @@ export async function GET(request) {
       if (seen.has(row.handle)) continue;
       seen.add(row.handle);
 
-      if (row.product_type === 'Foil Art Print') { counts.foil++; continue; }
       const cfg = fmt.byType[row.product_type];
       if (!cfg) { counts.unknown_type++; continue; }
       if (row.description_status !== 'described' || row.artwork_description == null) {

@@ -28,7 +28,7 @@ export async function GET(request) {
          GROUP BY p.product_type ORDER BY pages DESC`,
         [uploadId]
       );
-      missing = rows.filter(r => r.type !== 'Foil Art Print'); // Foil is excluded on purpose
+      missing = rows;
     }
 
     return NextResponse.json({ sentences, missing });

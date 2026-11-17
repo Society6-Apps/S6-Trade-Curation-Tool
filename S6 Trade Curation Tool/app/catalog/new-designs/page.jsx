@@ -215,7 +215,7 @@ function NewDesignsInner() {
                   url: cols.url !== -1 ? (row[cols.url] || '').trim() : '',
                   image_url: cols.image !== -1 ? (row[cols.image] || '').trim() : '',
                 });
-                if (ptype !== 'Foil Art Print' && !typeInfo[ptype]) {
+                if (!typeInfo[ptype]) {
                   unknownTypes.set(ptype, (unknownTypes.get(ptype) || 0) + 1);
                 }
               }
@@ -249,7 +249,6 @@ function NewDesignsInner() {
       const pages = [...newPages.values()];
       const noImage = designs.filter(d => !d.image_url).length;
       const flatCount = designs.filter(d => typeInfo[d.product_type]?.flat).length;
-      const foilOnly = designs.filter(d => d.product_type === 'Foil Art Print').length;
       payloadRef.current = {
         designs, pages,
         unknownTypes: [...unknownTypes.entries()].map(([type, n]) => ({ type, pages: n })),
@@ -262,7 +261,6 @@ function NewDesignsInner() {
         pendingFromBefore: [...allKeys].filter(k => inDbExtra.has(k)).length,
         newDesigns: designs.length,
         flat: flatCount, mockup: designs.length - flatCount, noImage,
-        foilOnly,
         pages: pages.length,
         unknownTypes: payloadRef.current.unknownTypes,
       });
@@ -415,9 +413,6 @@ function NewDesignsInner() {
               <div className="text-white/60">Scanned {scan.rows.toLocaleString()} rows · {scan.uniqueDesigns.toLocaleString()} unique designs</div>
               <div className="text-green-400">{scan.newDesigns.toLocaleString()} NEW designs need copy ({scan.flat} flat art · {scan.mockup} mockup-only{scan.noImage ? ` · ${scan.noImage} missing an image` : ''})</div>
               {scan.pendingFromBefore > 0 && <div className="text-amber-400">{scan.pendingFromBefore.toLocaleString()} designs were imported earlier but never finished — they’ll be included</div>}
-              {scan.foilOnly > 0 && (
-                <div className="text-white/40">{scan.foilOnly.toLocaleString()} of these only exist as Foil Art Print — always excluded from publishing, so an export with few or zero pages is normal</div>
-              )}
               <div className="text-white/40">{scan.pages.toLocaleString()} product pages will get stamped</div>
               {scan.unknownTypes.length > 0 && (
                 <div className="text-amber-400">
@@ -588,7 +583,6 @@ function NewDesignsInner() {
                 <div className="text-green-400">{exportCounts.counts.written.toLocaleString()} pages ready</div>
                 {exportCounts.counts.missing_copy > 0 && <div>{exportCounts.counts.missing_copy.toLocaleString()} skipped — copy not generated yet (finish Step 3)</div>}
                 {exportCounts.counts.unknown_type > 0 && <div className="text-amber-400">{exportCounts.counts.unknown_type.toLocaleString()} skipped — product type has no sentence (finish Step 2)</div>}
-                {exportCounts.counts.foil > 0 && <div>{exportCounts.counts.foil.toLocaleString()} Foil Art Print pages skipped (always excluded)</div>}
                 {exportCounts.counts.blank_art > 0 && <div>{exportCounts.counts.blank_art.toLocaleString()} skipped — blank artwork description</div>}
               </div>
             )}
