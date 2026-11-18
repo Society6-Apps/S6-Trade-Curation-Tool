@@ -305,24 +305,56 @@ export function parseLayers(text) {
 
 // ── Image fetch (verbatim from lib/describe.js) ───────────────
 
-export async function fetchImageAsBase64(imageUrl) {
+// Longest edge we ask Shopify's CDN for. Originals run up to 2500px and a few
+// are large enough to exceed the vision API's 10 MB image limit; 1600px is
+// plenty for describing artwork, is never upscaled, and cuts download volume.
+const IMAGE_MAX_WIDTH = 1600;
+
+// Statuses that mean "the image host is refusing us right now", not "this
+// image is broken". Shopify's CDN answers 403 when it throttles a burst.
+const THROTTLE_STATUSES = new Set([403, 429, 430, 503]);
+const THROTTLE_BACKOFF_MS = [1500, 4000];
+
+export function sizedImageUrl(imageUrl) {
   const fullUrl = imageUrl.startsWith('/') ? 'https://society6.com' + imageUrl : imageUrl;
+  try {
+    const u = new URL(fullUrl);
+    if (u.hostname === 'cdn.shopify.com' && !u.searchParams.has('width')) {
+      u.searchParams.set('width', String(IMAGE_MAX_WIDTH));
+      return u.toString();
+    }
+  } catch {}
+  return fullUrl;
+}
+
+// Throws an Error with .throttled = true when the host kept refusing after
+// the back-off retries, so the caller can pause the run instead of marking
+// the design failed.
+export async function fetchImageAsBase64(imageUrl) {
+  const fullUrl = sizedImageUrl(imageUrl);
   let lastErr;
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const res = await fetch(fullUrl, {
         headers: { 'User-Agent': 'Mozilla/5.0 (compatible; S6DescribeBot/1.0)', 'Accept': 'image/*' },
         signal: AbortSignal.timeout(6000),
         redirect: 'follow',
       });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
+      if (!res.ok) {
+        const err = new Error('HTTP ' + res.status);
+        err.throttled = THROTTLE_STATUSES.has(res.status);
+        throw err;
+      }
       const contentType = res.headers.get('content-type') || 'image/jpeg';
       const mediaType = contentType.split(';')[0].trim();
       const buffer = await res.arrayBuffer();
       return { base64: Buffer.from(buffer).toString('base64'), mediaType };
     } catch (e) {
       lastErr = e;
-      if (attempt === 0) await new Promise(r => setTimeout(r, 250));
+      if (attempt === 2) break;
+      if (e.throttled) await new Promise(r => setTimeout(r, THROTTLE_BACKOFF_MS[attempt]));
+      else if (attempt === 0) await new Promise(r => setTimeout(r, 250));
+      else break; // non-throttle errors keep the old two-attempt behavior
     }
   }
   throw lastErr || new Error('image fetch failed');

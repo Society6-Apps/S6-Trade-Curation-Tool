@@ -152,21 +152,35 @@ export async function POST(request) {
       [uploadId]
     );
 
-    const statuses = retryFailed ? ['pending', 'failed'] : ['pending'];
+    // Retry: put EVERY failed design in this upload back in the queue once.
+    // The browser only sends retryFailed on its first request, so each failed
+    // design gets exactly one more attempt per click (no endless loop on a
+    // design that can never succeed), and the loop then works through all of
+    // them instead of a single batch.
+    if (retryFailed) {
+      await pool.query(
+        `UPDATE products SET description_status = 'pending', updated_at = now()
+         WHERE description_status = 'failed'
+           AND image_url IS NOT NULL AND image_url <> ''
+           AND design_key IN (SELECT DISTINCT design_key FROM nd_pages WHERE upload_id = $1)`,
+        [uploadId]
+      );
+    }
+
     const { rows: products } = await pool.query(
       `SELECT id, design_key, title, image_url, product_type
        FROM products
-       WHERE description_status = ANY($2::description_status[])
+       WHERE description_status = 'pending'
          AND image_url IS NOT NULL AND image_url <> ''
          AND design_key IN (SELECT DISTINCT design_key FROM nd_pages WHERE upload_id = $1)
        ORDER BY created_at ASC
-       LIMIT $3`,
-      [uploadId, statuses, batchSize]
+       LIMIT $2`,
+      [uploadId, batchSize]
     );
 
     const fmt = await loadFormatConfig(pool);
     const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-    const stats = { succeeded: 0, failed: 0, costUsd: 0, failures: [] };
+    const stats = { succeeded: 0, failed: 0, costUsd: 0, failures: [], throttled: false };
 
     if (products.length > 0) {
       // id::text comparison works whether products.id is uuid or integer
@@ -179,6 +193,7 @@ export async function POST(request) {
       let next = 0;
       async function pump() {
         while (true) {
+          if (stats.throttled) return; // image host is refusing us — stop taking work
           const i = next++;
           if (i >= products.length) return;
           const p = products[i];
@@ -191,6 +206,16 @@ export async function POST(request) {
             stats.succeeded++;
             stats.costUsd += costUsd;
           } catch (err) {
+            if (err.throttled) {
+              // Not this design's fault: put it back in the queue and pause the
+              // batch. The browser waits, then resumes.
+              stats.throttled = true;
+              await pool.query(
+                `UPDATE products SET description_status = 'pending', updated_at = now() WHERE id = $1`,
+                [p.id]
+              ).catch(() => {});
+              return;
+            }
             await pool.query(
               `UPDATE products SET description_status = 'failed',
                  description_attempts = description_attempts + 1,
@@ -203,6 +228,16 @@ export async function POST(request) {
         }
       }
       await Promise.all(Array.from({ length: Math.min(concurrency, products.length) }, pump));
+
+      // Anything this batch claimed but never reached (paused early) goes back
+      // to pending so the next request picks it up.
+      if (stats.throttled) {
+        await pool.query(
+          `UPDATE products SET description_status = 'pending', updated_at = now()
+           WHERE description_status = 'processing' AND id::text = ANY($1::text[])`,
+          [products.map(p => String(p.id))]
+        ).catch(() => {});
+      }
     }
 
     const { rows: [counts] } = await pool.query(

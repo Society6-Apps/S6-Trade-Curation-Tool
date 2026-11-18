@@ -82,6 +82,7 @@ function NewDesignsInner() {
   const [generating, setGenerating] = useState(false);
   const [genStats, setGenStats] = useState(null);
   const [genError, setGenError] = useState('');
+  const [genNotice, setGenNotice] = useState('');
   const stopRef = useRef(false);
 
   // step 4
@@ -304,10 +305,11 @@ function NewDesignsInner() {
 
   async function runGenerate(retryFailed = false) {
     if (!uploadId) return;
-    setGenerating(true); setGenError(''); stopRef.current = false;
+    setGenerating(true); setGenError(''); setGenNotice(''); stopRef.current = false;
     setGenStats(prev => prev || { succeeded: 0, failed: 0, costUsd: 0, failures: [] });
     try {
       let first = true;
+      let throttleStreak = 0;
       while (!stopRef.current) {
         const data = await postJSON('/api/new-designs/describe', {
           uploadId, retryFailed: retryFailed && first,
@@ -320,6 +322,20 @@ function NewDesignsInner() {
           failures: [...(prev?.failures || []), ...(data.failures || [])].slice(-8),
         }));
         await loadState();
+        if (data.throttled) {
+          // Shopify's image server refused a download. Designs stay queued
+          // (not failed); wait, then carry on. Give up after 4 in a row.
+          throttleStreak++;
+          if (throttleStreak >= 4) {
+            throw new Error("Shopify's image server keeps refusing downloads, so the run is paused. Nothing was marked failed. Wait 15 minutes");
+          }
+          const waitSec = 45 * throttleStreak;
+          setGenNotice(`Shopify's image server is refusing downloads — waiting ${waitSec} seconds, then resuming automatically…`);
+          await new Promise(r => setTimeout(r, waitSec * 1000));
+          setGenNotice('');
+          continue;
+        }
+        throttleStreak = 0;
         if ((data.succeeded || 0) + (data.failed || 0) === 0 && data.remaining === 0) break;
         if (data.remaining === 0) break;
         await new Promise(r => setTimeout(r, 250));
@@ -329,6 +345,7 @@ function NewDesignsInner() {
     } catch (e) {
       setGenError(e.message);
     }
+    setGenNotice('');
     setGenerating(false);
   }
 
@@ -507,6 +524,7 @@ function NewDesignsInner() {
                 re-upload of a full export that includes Image Src.
               </div>
             )}
+            {genNotice && <div className="mt-3 bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 text-amber-300 text-xs">{genNotice}</div>}
             {genError && <div className="mt-3 bg-red-500/10 border border-red-500/20 rounded-lg p-3 text-red-400 text-xs">{genError} — click Generate again to resume; nothing is lost.</div>}
             {genStats?.failures?.length > 0 && (
               <div className="mt-3 text-xs text-red-300/70 space-y-0.5">
