@@ -134,6 +134,36 @@ export function buildBody(artwork, context, formatSentence, dropContext) {
   return `<p>${a}${cpart} ${esc(formatSentence)}</p>`;
 }
 
+// ── scrub-banned.mjs (verbatim behavior) ──────────────────────
+// The Mac pipeline ran this over the copy FILE before stamping, so the database
+// still holds the raw wording for older artwork (banned adjectives, "design",
+// em-dashes). Anything published from the database must go through it, or a
+// page stamped today reads differently from that artwork's pages already live.
+// Touches artwork + meta only, exactly like the original (context is left alone).
+
+const SCRUB_ADJ = ['stunning','beautiful','beautifully','vibrant','gorgeous','unique','perfect','perfectly','perfection'];
+const SCRUB_ADJ_RE = new RegExp('\\b(' + SCRUB_ADJ.join('|') + ')\\b\\s+', 'gi');
+
+export function scrubCopy(s) {
+  if (!s) return s;
+  let t = s.replace(/\s*[\u2014\u2013]\s*/g, ', ');
+  t = t.replace(SCRUB_ADJ_RE, '');
+  t = t.replace(/\bthis design\b/gi, 'this artwork')
+       .replace(/\bthe design\b/gi, 'the artwork')
+       .replace(/\bdesigns\b/gi, 'artworks')
+       .replace(/\bdesign\b/gi, 'artwork');
+  t = t.replace(/\s{2,}/g, ' ').replace(/\s+([.,;:])/g, '$1').trim();
+  return t.replace(/(^|[.!?]\s+)([a-z])/g, (m, p, c) => p + c.toUpperCase());
+}
+
+// What actually gets published: scrubbed copy through the stamp.py assembly.
+export function publishBody(artwork, context, formatSentence, dropContext) {
+  return buildBody(scrubCopy(artwork), context, formatSentence, dropContext);
+}
+export function publishMeta(metaLabel, meta) {
+  return buildMeta(metaLabel, scrubCopy((meta || '').trim()) || '');
+}
+
 // ── fix-copy.mjs (verbatim behavior) ──────────────────────────
 
 const EMDASH = /[—–]/;

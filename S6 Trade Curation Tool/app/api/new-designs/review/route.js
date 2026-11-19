@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import {
-  getPool, loadFormatConfig, buildBody, buildMeta, lintCopy, fixDesc, fixMeta, clampMeta,
+  getPool, loadFormatConfig, publishBody, publishMeta, lintCopy, fixDesc, fixMeta, clampMeta,
 } from '../../../../lib/newDesigns.js';
 
 export const dynamic = 'force-dynamic';
@@ -39,9 +39,9 @@ export async function GET(request) {
       const context = r.context_clause || '';
       const meta = r.meta_description || '';
       const bodyPreview = artwork && cfg
-        ? buildBody(artwork, context, cfg.sentence, cfg.drop_context)
+        ? publishBody(artwork, context, cfg.sentence, cfg.drop_context)
         : null;
-      const metaPreview = meta ? buildMeta(cfg ? cfg.meta_label : null, meta) : null;
+      const metaPreview = meta ? publishMeta(cfg ? cfg.meta_label : null, meta) : null;
       const warnings = [
         ...lintCopy(artwork).map(w => 'artwork: ' + w),
         ...lintCopy(context).map(w => 'context: ' + w),

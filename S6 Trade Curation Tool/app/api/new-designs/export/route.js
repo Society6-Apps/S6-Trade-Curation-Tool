@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getPool, loadFormatConfig, buildBody, buildMeta } from '../../../../lib/newDesigns.js';
+import { getPool, loadFormatConfig, publishBody, publishMeta } from '../../../../lib/newDesigns.js';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 26;
@@ -63,8 +63,8 @@ export async function GET(request) {
       }
       if (!row.artwork_description.trim()) { counts.blank_art++; continue; }
 
-      const body = buildBody(row.artwork_description, row.context_clause || '', cfg.sentence, cfg.drop_context);
-      const seo = buildMeta(cfg.meta_label, row.meta_description || '');
+      const body = publishBody(row.artwork_description, row.context_clause || '', cfg.sentence, cfg.drop_context);
+      const seo = publishMeta(cfg.meta_label, row.meta_description || '');
       lines.push([
         csvField(row.page_id || ''),
         csvField(row.handle),

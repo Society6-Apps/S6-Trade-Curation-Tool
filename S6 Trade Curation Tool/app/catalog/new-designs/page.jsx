@@ -161,7 +161,8 @@ function NewDesignsInner() {
 
       // column indexes resolved from the header row
       let cols = null;
-      const stats = { rows: 0, active: 0 };
+      const stats = { rows: 0, active: 0, catchUpPages: 0 };
+      let prevHandle = null; // a product's extra image rows repeat the handle with an empty Body HTML
       const allKeys = new Set();
       const newDesigns = new Map();   // key -> {prio, rep fields}
       const newPages = new Map();     // handle -> page row
@@ -184,6 +185,7 @@ function NewDesignsInner() {
                   vendor: norm.indexOf('vendor'),
                   image: norm.findIndex(h => h.startsWith('image src') || h === 'image' || h.startsWith('image (')),
                   url: norm.indexOf('url'),
+                  body: norm.indexOf('body html'),
                 };
                 if (cols.image === -1) cols.image = norm.findIndex(h => h.includes('image'));
                 if (cols.handle === -1 || cols.type === -1) {
@@ -196,6 +198,8 @@ function NewDesignsInner() {
               const handle = (row[cols.handle] || '').trim();
               const ptype = (row[cols.type] || '').trim();
               if (!handle || !ptype) continue;
+              const firstRow = handle !== prevHandle;
+              prevHandle = handle;
               const status = cols.status !== -1 ? (row[cols.status] || '').trim().toLowerCase() : 'active';
               if (status !== 'active') continue;
               stats.active++;
@@ -206,8 +210,16 @@ function NewDesignsInner() {
 
               const isNewToDb = !haveCopy.has(key) && !inDbExtra.has(key);
               const needsPages = !haveCopy.has(key); // new OR imported-but-unfinished
+              // Page-level check: the artwork already has copy, but THIS page's
+              // description is empty on the site (a format added after the artwork
+              // was described, or a page an earlier run missed). It gets stamped
+              // from the existing copy — no generation. Only a product's first row
+              // carries Body HTML, so image rows are never read as empty pages.
+              const catchUp = !needsPages && cols.body !== -1 && firstRow
+                && !(row[cols.body] || '').trim();
+              if (catchUp && !newPages.has(handle)) stats.catchUpPages++;
 
-              if (needsPages && !newPages.has(handle)) {
+              if ((needsPages || catchUp) && !newPages.has(handle)) {
                 newPages.set(handle, {
                   page_id: cols.id !== -1 ? (row[cols.id] || '').trim() : '',
                   handle,
@@ -262,6 +274,7 @@ function NewDesignsInner() {
         pendingFromBefore: [...allKeys].filter(k => inDbExtra.has(k)).length,
         newDesigns: designs.length,
         flat: flatCount, mockup: designs.length - flatCount, noImage,
+        hasBody: cols.body !== -1, catchUpPages: stats.catchUpPages,
         pages: pages.length,
         unknownTypes: payloadRef.current.unknownTypes,
       });
@@ -408,8 +421,8 @@ function NewDesignsInner() {
         <div className="bg-white/5 border border-white/10 rounded-xl p-5">
           <h2 className="text-white/60 text-xs uppercase tracking-widest mb-1">Step 1 · Upload catalog export</h2>
           <p className="text-white/25 text-xs mb-4">
-            Full Matrixify product export (ID, Handle, Title, Vendor, Type, Status, Image Src).
-            The file is read in your browser — only the new designs are sent to the database.
+            Full Matrixify product export (ID, Handle, Title, Body HTML, Vendor, Type, Status, Image Src).
+            The file is read in your browser — only new designs and pages that need copy are sent to the database.
           </p>
           <div
             className="border border-dashed border-white/10 rounded-lg p-8 text-center cursor-pointer hover:border-violet-500/50 hover:bg-violet-500/5 transition-colors"
@@ -430,6 +443,15 @@ function NewDesignsInner() {
               <div className="text-white/60">Scanned {scan.rows.toLocaleString()} rows · {scan.uniqueDesigns.toLocaleString()} unique designs</div>
               <div className="text-green-400">{scan.newDesigns.toLocaleString()} NEW designs need copy ({scan.flat} flat art · {scan.mockup} mockup-only{scan.noImage ? ` · ${scan.noImage} missing an image` : ''})</div>
               {scan.pendingFromBefore > 0 && <div className="text-amber-400">{scan.pendingFromBefore.toLocaleString()} designs were imported earlier but never finished — they’ll be included</div>}
+              {scan.catchUpPages > 0 && (
+                <div className="text-green-400">{scan.catchUpPages.toLocaleString()} page{scan.catchUpPages > 1 ? 's have' : ' has'} an empty description even though the artwork already has copy — {scan.catchUpPages > 1 ? 'they' : 'it'}’ll be stamped from that copy, no generation needed</div>
+              )}
+              {scan.catchUpPages > 40000 && (
+                <div className="text-amber-400">That is a very large batch for one import file. Check with John before importing — a catch-up this size is better built as separate files.</div>
+              )}
+              {!scan.hasBody && (
+                <div className="text-amber-400">This export has no Body HTML column, so pages with an empty description on already-described artwork can’t be detected. Re-export with Body HTML included to catch them.</div>
+              )}
               <div className="text-white/40">{scan.pages.toLocaleString()} product pages will get stamped</div>
               {scan.unknownTypes.length > 0 && (
                 <div className="text-amber-400">
@@ -439,7 +461,7 @@ function NewDesignsInner() {
               <div className="pt-2">
                 <button onClick={runImport} disabled={importing || scan.newDesigns + scan.pages === 0}
                   className="px-4 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-500 disabled:opacity-30">
-                  {importing ? (importProgress || 'Importing…') : `Import ${scan.newDesigns.toLocaleString()} designs`}
+                  {importing ? (importProgress || 'Importing…') : (scan.newDesigns > 0 ? `Import ${scan.newDesigns.toLocaleString()} designs` : `Register ${scan.pages.toLocaleString()} pages`)}
                 </button>
               </div>
             </div>
